@@ -1,0 +1,17 @@
+steps:
+# Step 1: Clone the repository
+- name: 'gcr.io/cloud-builders/git'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    git clone https://github.com/Praveenarumugam07/dev-repo.git app
+    cd app
+    zip -r python-app.zip .
+
+# Step 2: Upload zipped file to GCS bucket
+- name: 'gcr.io/cloud-builders/gsutil'
+  args:
+  - cp
+  - app/python-app.zip
+  - gs://dev-zipped-app-bucket/python-app.zip
