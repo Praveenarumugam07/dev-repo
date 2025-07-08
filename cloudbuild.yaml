@@ -17,3 +17,5 @@ steps:
   - cp
   - app/python-app.zip
   - gs://dev-zipped-app-bucket/python-app.zip
+options:
+  logging: CLOUD_LOGGING_ONLY
