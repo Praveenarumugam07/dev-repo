@@ -13,3 +13,6 @@ steps:
         apt-get update && apt-get install -y zip
         cd app
         zip -r ../app.zip .
+
+options:
+  logging: CLOUD_LOGGING_ONLY
