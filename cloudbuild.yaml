@@ -16,6 +16,6 @@ steps:
   args:
   - cp
   - app/python-app.zip
-  - gs://dev-zipped-app-bucket/python-app.zip
+  - gs://hello-buck-gugu/python-app.zip
 options:
   logging: CLOUD_LOGGING_ONLY
