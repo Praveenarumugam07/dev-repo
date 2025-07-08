@@ -1,18 +1,14 @@
 steps:
-  - name: 'gcr.io/cloud-builders/git'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        git clone https://github.com/myrepo/app.git
-  - name: 'gcr.io/cloud-builders/gcloud'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        apt-get update && apt-get install -y zip
-        cd app
-        zip -r ../app.zip .
-
-options:
-  logging: CLOUD_LOGGING_ONLY
+- name: 'gcr.io/cloud-builders/git'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    git clone https://github.com/Praveenarumugam07/dev-repo.git app
+    cd app
+    zip -r python-app.zip .
+- name: 'gcr.io/cloud-builders/gsutil'
+  args:
+  - cp
+  - app/python-app.zip
+  - gs://dev-zipped-app-bucket/python-app.zip
