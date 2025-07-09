@@ -1,21 +1,109 @@
 steps:
-# Step 1: Use ubuntu image to install git and zip, then clone and zip app
-- name: 'ubuntu'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    apt update
-    apt install -y git zip
-    git clone https://github.com/<your-username>/<repo-name>.git app
-    cd app
-    zip -r python-app.zip .
+  # Step 0: Generate VERSION_TAG and write to version.env
+  - name: 'bash'
+    id: 'Generate Version Tag'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        VERSION_TAG=$$(date +%Y%m%d%H%M%S)
+        echo "VERSION_TAG=$${VERSION_TAG}" > /workspace/version.env
+        cat /workspace/version.env
 
-# Step 2: Upload zipped file to GCS bucket
-- name: 'gcr.io/cloud-builders/gsutil'
-  args:
-  - cp
-  - app/python-app.zip
-  - gs://hello-buck-gugu/python-app.zip
+  # Step 1: Copy zipped application from Dev to Prod bucket
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'Copy App from Dev to Prod'
+    entrypoint: 'bash'
+    args:
+      - -c
+      - |
+        echo "🔄 Copying zipped app from Dev to Prod bucket..."
+        gsutil cp gs://kliks/python-app.zip gs://prod-buck-s/app/python-app.zip
+
+  # Step 2: Create instance template with startup script to deploy app
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'Create Instance Template'
+    entrypoint: 'bash'
+    args:
+      - -c
+      - |
+        source /workspace/version.env
+        echo "🛠️ Creating instance template prod-template-$${VERSION_TAG}"
+        gcloud compute instance-templates create prod-template-$${VERSION_TAG} \
+          --project=sylvan-hydra-464904-d9 \
+          --machine-type=e2-medium \
+          --region=asia-south1 \
+          --network=default \
+          --tags=http-server \
+          --metadata=startup-script='#!/bin/bash
+          echo "🔁 Starting VM setup..."
+          sudo apt-get update
+          sudo apt-get install -y unzip python3-venv python3-pip
+          sudo mkdir -p /opt/app
+          cd /opt/app
+          sudo gsutil cp gs://prod-buck-s/app/python-app.zip /opt/app/source.zip
+          sudo unzip source.zip -d .
+          cd [YOUR_UNZIPPED_FOLDER_NAME]
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+          nohup python3 app.py --host=0.0.0.0 --port=8080 > /opt/app/app.log 2>&1 &'
+
+  # Step 3: Create firewall rule for port 8080
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'Create Firewall Rule'
+    entrypoint: 'bash'
+    args:
+      - -c
+      - |
+        echo "🔐 Creating firewall rule..."
+        gcloud compute firewall-rules create allow-8080 \
+          --project=sylvan-hydra-464904-d9 \
+          --allow tcp:8080 \
+          --target-tags=http-server \
+          --direction=INGRESS \
+          --priority=1000 || echo "⚠️ Firewall may already exist"
+
+  # Step 4: Create health check
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'Create Health Check'
+    entrypoint: 'bash'
+    args:
+      - -c
+      - |
+        echo "❤️ Creating health check..."
+        gcloud compute health-checks create http prod-health-check \
+          --project=sylvan-hydra-464904-d9 \
+          --port=8080 || echo "⚠️ Health check may already exist"
+
+  # Step 5: Create or update MIG with new template
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'Create or Update MIG'
+    entrypoint: 'bash'
+    args:
+      - -c
+      - |
+        source /workspace/version.env
+        echo "📦 Checking or creating MIG with template prod-template-$${VERSION_TAG}"
+        if ! gcloud compute instance-groups managed describe prod-mig --region=asia-south1 > /dev/null 2>&1; then
+          echo "🔨 Creating new MIG..."
+          gcloud compute instance-groups managed create prod-mig \
+            --project=sylvan-hydra-464904-d9 \
+            --region=asia-south1 \
+            --size=1 \
+            --template=prod-template-$${VERSION_TAG} \
+            --target-distribution-shape=EVEN
+        else
+          echo "♻️ Updating MIG with new template..."
+          gcloud compute instance-groups managed set-instance-template prod-mig \
+            --region=asia-south1 \
+            --template=prod-template-$${VERSION_TAG}
+          echo "🔁 Performing rolling restart..."
+          gcloud compute instance-groups managed rolling-action restart prod-mig \
+            --region=asia-south1
+        fi
+
+timeout: 1200s
+
 options:
   logging: CLOUD_LOGGING_ONLY
